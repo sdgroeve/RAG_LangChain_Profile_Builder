@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Researcher Expertise Chat</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+</head>
+<body class="bg-gray-100 flex flex-col h-screen">
+    <div class="flex-grow container mx-auto max-w-4xl px-4 py-8 flex flex-col">
+        <div id="chat-container" class="flex-grow bg-white rounded-lg shadow-md mb-4 overflow-y-auto p-4">
+            <div id="chat-messages" class="space-y-4">
+                <div class="text-center text-gray-500 py-4">
+                    Researcher Expertise Chat
+                </div>
+            </div>
+        </div>
+        
+        <div class="chat-input-area flex">
+            <input 
+                type="text" 
+                id="user-input" 
+                placeholder="Ask about researcher expertise..." 
+                class="flex-grow p-3 border rounded-l-lg focus:outline-none focus:ring-2 focus:ring-gray-500"
+            >
+            <button 
+                id="send-btn" 
+                class="bg-gray-700 text-white px-4 py-3 rounded-r-lg hover:bg-gray-800 transition"
+            >
+                <i class="fas fa-paper-plane"></i>
+            </button>
+        </div>
+    </div>
+
+    <script>
+        const chatContainer = document.getElementById('chat-messages');
+        const userInput = document.getElementById('user-input');
+        const sendBtn = document.getElementById('send-btn');
+
+        function addMessage(content, type = 'user') {
+            const messageDiv = document.createElement('div');
+            messageDiv.classList.add('message', 'p-3', 'rounded-lg');
+            
+            if (type === 'user') {
+                messageDiv.classList.add('bg-gray-200', 'text-gray-800', 'self-end');
+                messageDiv.innerHTML = `
+                    <div class="font-bold mb-1">You</div>
+                    ${content}
+                `;
+            } else if (type === 'invalid') {
+                messageDiv.classList.add('bg-red-50', 'text-red-800', 'border', 'border-red-200');
+                messageDiv.innerHTML = `
+                    <div class="font-bold mb-1">Query Validation</div>
+                    <div class="flex items-center gap-2">
+                        <i class="fas fa-exclamation-circle text-red-500"></i>
+                        <span>${content}</span>
+                    </div>
+                `;
+            } else {
+                messageDiv.classList.add('bg-gray-100', 'text-gray-800');
+                messageDiv.innerHTML = `
+                    <div class="font-bold mb-1">AI Assistant</div>
+                    <div class="space-y-4">
+                        <div class="response-summary">
+                            ${formatAIResponse(content)}
+                        </div>
+                    </div>
+                `;
+            }
+
+            chatContainer.appendChild(messageDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        function formatAIResponse(content) {
+            // Convert markdown bold to HTML bold
+            content = content.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+            
+            // Split content by double newlines to identify paragraphs
+            const paragraphs = content.split(/\n\n+/);
+            
+            // Format each paragraph with proper styling
+            return paragraphs.map(para => {
+                // Check if paragraph starts with common section indicators
+                if (para.toLowerCase().startsWith('summary:') || 
+                    para.toLowerCase().startsWith('analysis:') ||
+                    para.toLowerCase().startsWith('recommendation:') ||
+                    para.toLowerCase().startsWith('conclusion:')) {
+                    const [header, ...content] = para.split(':');
+                    return `
+                        <div class="mb-3">
+                            <div class="font-semibold text-gray-700">${header}:</div>
+                            <div class="mt-1 text-gray-600">${content.join(':')}</div>
+                        </div>
+                    `;
+                }
+                return `<div class="mb-3 text-gray-600">${para}</div>`;
+            }).join('');
+        }
+
+        function sendMessage() {
+            const message = userInput.value.trim();
+            if (!message) return;
+
+            addMessage(message);
+            userInput.value = '';
+
+            userInput.disabled = true;
+            sendBtn.disabled = true;
+
+            const loadingMessage = document.createElement('div');
+            loadingMessage.classList.add('text-gray-500', 'italic', 'p-3');
+            loadingMessage.textContent = 'Validating query...';
+            chatContainer.appendChild(loadingMessage);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+
+            fetch('/chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ message: message })
+            })
+            .then(response => response.json())
+            .then(data => {
+                chatContainer.removeChild(loadingMessage);
+                
+                if (!data.search_results || data.search_results.length === 0) {
+                    // Invalid query
+                    addMessage(data.message, 'invalid');
+                } else {
+                    // Valid query with response
+                    addMessage(data.message, 'ai');
+                }
+            })
+            .catch(error => {
+                chatContainer.removeChild(loadingMessage);
+                addMessage(`Error: ${error.message}`, 'invalid');
+            })
+            .finally(() => {
+                userInput.disabled = false;
+                sendBtn.disabled = false;
+                userInput.focus();
+            });
+        }
+
+        sendBtn.addEventListener('click', sendMessage);
+        userInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+    </script>
+</body>
+</html>
