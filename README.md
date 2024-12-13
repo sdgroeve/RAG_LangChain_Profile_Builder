@@ -1,4 +1,4 @@
-# Researcher Expertise RAG System
+# Profile RAG System
 
 A Flask-based web application that uses Retrieval-Augmented Generation (RAG) to intelligently search and match researcher expertise based on natural language queries. The system provides detailed, context-aware responses about researchers' expertise and potential collaborations.
 
