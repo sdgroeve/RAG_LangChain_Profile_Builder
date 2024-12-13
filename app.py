@@ -2,12 +2,17 @@
 import os
 import json
 import argparse
+import logging
 from flask import Flask, render_template, request, jsonify
 from flask_cors import CORS
 import chromadb
 from sentence_transformers import SentenceTransformer
 import requests
 from collections import defaultdict
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class ResearcherExpertiseRAG:
     def __init__(self, 
@@ -27,8 +32,24 @@ class ResearcherExpertiseRAG:
         # Initialize ChromaDB client
         self.chroma_client = chromadb.Client()
         
+        # Test Ollama connection
+        self._test_ollama_connection()
+        
         # Populate database once during initialization
         self._populate_database()
+
+    def _test_ollama_connection(self):
+        """
+        Test connection to Ollama server
+        """
+        try:
+            response = requests.get("http://localhost:11434/api/version")
+            response.raise_for_status()
+            logger.info("Successfully connected to Ollama server")
+        except requests.RequestException as e:
+            logger.error(f"Failed to connect to Ollama server: {str(e)}")
+            logger.error("Please ensure Ollama is running on localhost:11434")
+            raise ConnectionError("Could not connect to Ollama server. Please ensure it is running.")
 
     def _evaluate_query(self, query: str) -> tuple[bool, str]:
         """
@@ -77,52 +98,58 @@ Respond with either:
             return is_valid, message
 
         except requests.RequestException as e:
+            logger.error(f"Error evaluating query: {str(e)}")
             return False, f"Error evaluating query: {str(e)}"
 
     def _populate_database(self):
         """
         Embed and store researcher expertise chunks in ChromaDB.
         """
-        # Delete collection if it exists
         try:
-            self.chroma_client.delete_collection("researcher_expertises")
-        except:
-            pass
+            # Delete collection if it exists
+            try:
+                self.chroma_client.delete_collection("researcher_expertises")
+            except:
+                pass
 
-        # Create new collection
-        self.collection = self.chroma_client.create_collection(
-            name="researcher_expertises", 
-            metadata={"hnsw:space": "cosine"}
-        )
+            # Create new collection
+            self.collection = self.chroma_client.create_collection(
+                name="researcher_expertises", 
+                metadata={"hnsw:space": "cosine"}
+            )
 
-        document_ids = []
-        embeddings = []
-        metadatas = []
-        
-        for researcher, expertise in self.expertise_data.items():
-            chunks = self._chunk_expertise(expertise)
+            document_ids = []
+            embeddings = []
+            metadatas = []
             
-            for i, chunk in enumerate(chunks):
-                # Create unique ID
-                doc_id = f"{researcher}_{i}"
-                document_ids.append(doc_id)
+            for researcher, expertise in self.expertise_data.items():
+                chunks = self._chunk_expertise(expertise)
                 
-                # Embed chunk
-                embedding = self.model.encode(chunk).tolist()
-                embeddings.append(embedding)
-                
-                # Store metadata
-                metadatas.append({
-                    "researcher": researcher,
-                    "original_text": chunk
-                })
+                for i, chunk in enumerate(chunks):
+                    # Create unique ID
+                    doc_id = f"{researcher}_{i}"
+                    document_ids.append(doc_id)
+                    
+                    # Embed chunk
+                    embedding = self.model.encode(chunk).tolist()
+                    embeddings.append(embedding)
+                    
+                    # Store metadata
+                    metadatas.append({
+                        "researcher": researcher,
+                        "original_text": chunk
+                    })
 
-        # Add to collection
-        self.collection.add(
-            ids=document_ids,
-            embeddings=embeddings,
-            metadatas=metadatas
-        )
+            # Add to collection
+            self.collection.add(
+                ids=document_ids,
+                embeddings=embeddings,
+                metadatas=metadatas
+            )
+            logger.info(f"Successfully populated database with {len(document_ids)} chunks")
+        except Exception as e:
+            logger.error(f"Error populating database: {str(e)}")
+            raise
 
     def _chunk_expertise(self, expertise_text: str) -> list:
         """
@@ -200,6 +227,7 @@ Respond with either:
                 'is_valid': True
             }
         except Exception as e:
+            logger.error(f"Error during RAG process: {str(e)}")
             return {
                 'query': query,
                 'search_results': [],
@@ -254,53 +282,69 @@ Important: Do not repeat researchers or split their expertise across multiple pa
             return generated_text
 
         except requests.RequestException as e:
+            logger.error(f"Error generating response: {str(e)}")
             return f"Error generating response: {str(e)}"
 
 def run_cli_mode(expertise_data_path: str, query: str):
     """
     Run the RAG system in CLI mode with a single query.
     """
-    # Load expertise data
-    with open(expertise_data_path, 'r') as f:
-        expertise_data = json.load(f)
-    
-    # Initialize RAG system
-    rag_system = ResearcherExpertiseRAG(expertise_data=expertise_data)
-    
-    # Process query
-    result = rag_system.search_expertise(query)
-    
-    # Print results
-    if result['is_valid']:
-        print("\nQuery Results:")
-        print("-" * 80)
-        print(f"Query: {result['query']}")
-        print("-" * 80)
-        print("\nGenerated Response:")
-        print(result['generated_response'])
-        print("\nDetailed Search Results:")
-        print("-" * 80)
-        for r in result['search_results']:
-            print(f"\nResearcher: {r['researcher']}")
-            print(f"Similarity Score: {r['similarity_score']:.4f}")
-            print(f"Expertise: {r['expertise_chunk'][:200]}...")
-    else:
-        print("\nInvalid Query:")
-        print(result['generated_response'])
+    try:
+        # Load expertise data
+        with open(expertise_data_path, 'r') as f:
+            expertise_data = json.load(f)
+        
+        # Initialize RAG system
+        rag_system = ResearcherExpertiseRAG(expertise_data=expertise_data)
+        
+        # Process query
+        result = rag_system.search_expertise(query)
+        
+        # Print results
+        if result['is_valid']:
+            print("\nQuery Results:")
+            print("-" * 80)
+            print(f"Query: {result['query']}")
+            print("-" * 80)
+            print("\nGenerated Response:")
+            print(result['generated_response'])
+            print("\nDetailed Search Results:")
+            print("-" * 80)
+            for r in result['search_results']:
+                print(f"\nResearcher: {r['researcher']}")
+                print(f"Similarity Score: {r['similarity_score']:.4f}")
+                print(f"Expertise: {r['expertise_chunk'][:200]}...")
+        else:
+            print("\nInvalid Query:")
+            print(result['generated_response'])
+    except Exception as e:
+        logger.error(f"Error in CLI mode: {str(e)}")
+        print(f"Error: {str(e)}")
 
-# Load JSON data for web mode
-if os.path.exists('test.publications_data_expertise_summary.json'):
-    with open('test.publications_data_expertise_summary.json', 'r') as f:
-        json_data = json.load(f)
-else:
-    json_data = {}
-
-# Initialize RAG system for web mode
-rag_system = ResearcherExpertiseRAG(expertise_data=json_data)
-
-# Flask App
+# Initialize Flask app
 app = Flask(__name__)
 CORS(app)
+
+# Load JSON data for web mode
+json_data = {}
+expertise_file = os.path.join('output', 'publications_data_expertise_summary.json')
+try:
+    if os.path.exists(expertise_file):
+        with open(expertise_file, 'r') as f:
+            json_data = json.load(f)
+            logger.info(f"Successfully loaded expertise data from {expertise_file}")
+    else:
+        logger.warning(f"Expertise data file not found at {expertise_file}")
+except Exception as e:
+    logger.error(f"Error loading expertise data: {str(e)}")
+
+# Initialize RAG system for web mode
+try:
+    rag_system = ResearcherExpertiseRAG(expertise_data=json_data)
+    logger.info("Successfully initialized RAG system")
+except Exception as e:
+    logger.error(f"Error initializing RAG system: {str(e)}")
+    raise
 
 @app.route('/')
 def index():
@@ -324,6 +368,7 @@ def chat():
         return jsonify(response)
     
     except Exception as e:
+        logger.error(f"Error processing chat request: {str(e)}")
         return jsonify({
             'message': f"An error occurred: {str(e)}",
             'search_results': []
