@@ -6,7 +6,7 @@ from bs4 import BeautifulSoup
 from datetime import datetime
 
 # Define the input and output file paths
-input_file = "test.researchers.txt"  # Text file containing researcher names (one per line)
+input_file = "researchers/test.researchers.txt"  # Text file containing researcher names (one per line)
 output_json_file = "output/test.publications_data.json"
 
 def normalize_name(name):
@@ -74,7 +74,7 @@ def extract_publication_details(publication_url, researcher_surname):
             abstract_text = abstract.text.strip() if abstract else "Abstract not available"
             
             # Extract publication type
-            publication_type = soup.find('dd', text=re.compile(r'Journal Article'))
+            publication_type = soup.find('dd', string=re.compile(r'Journal Article'))
             publication_type_text = publication_type.text.strip() if publication_type else "Type not specified"
             publication_type_text = re.sub(r"\s+", " ", publication_type_text)
             
@@ -83,7 +83,7 @@ def extract_publication_details(publication_url, researcher_surname):
             doi = doi_element['content'] if doi_element else "DOI not available"
             
             # Extract UGent classification
-            classification = soup.find('dt', text="UGent classification")
+            classification = soup.find('dt', string="UGent classification")
             classification_text = classification.find_next('dd').text.strip() if classification else "Classification not specified"
             
             # Extract keywords
