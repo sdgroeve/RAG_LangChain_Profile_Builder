@@ -49,6 +49,52 @@ ollama pull llama3
 }
 ```
 
+## Data Preparation Scripts
+
+The system includes two scripts for preparing researcher expertise data:
+
+### hint2publications.py
+
+This script extracts publication data from UGent's research portal for specified researchers. It focuses on:
+- Retrieving publications where the researcher is either first or last author
+- Filtering for A1 journal articles from the past 9 years
+- Extracting key information including:
+  - Abstract
+  - Publication type
+  - DOI
+  - UGent classification
+  - Keywords
+
+Usage:
+1. Create a text file with researcher names (one per line) in the `researchers` directory
+2. Update the input and output file paths in the script:
+```python
+input_file = "researchers/test.researchers.txt"
+output_json_file = "output/test.publications_data.json"
+```
+3. Run the script:
+```bash
+python hint2publications.py
+```
+
+### generate_expertise.py
+
+This script processes the publication data extracted by hint2publications.py to generate expertise summaries using Ollama/Llama3. It performs:
+- Generation of concise summaries for each publication's abstract
+- Creation of comprehensive expertise profiles by analyzing patterns across a researcher's publications
+- Output of both individual publication summaries and overall researcher expertise profiles
+
+Usage:
+1. Ensure hint2publications.py has been run first to generate the publication data
+2. Run the script:
+```bash
+python generate_expertise.py
+```
+
+The script generates two output files:
+- `output/test.publications_data_expertise.json`: Contains the original publication data enhanced with individual paper summaries
+- `output/test.publications_data_expertise_summary.json`: Contains the final expertise profiles for each researcher
+
 ## Usage
 
 The system can be used in two modes: Web Interface or Command Line Interface (CLI).
