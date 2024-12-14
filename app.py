@@ -1,4 +1,3 @@
-# app.py
 import os
 import json
 import argparse
@@ -56,7 +55,6 @@ class ResearcherExpertiseRAG:
         Evaluate if the query is related to researcher expertise search.
         Returns a tuple of (is_valid, message).
         """
-        # Construct prompt for query evaluation
         evaluation_prompt = f"""Evaluate if the following query is related to finding researchers based on expertise, scientific input, or academic collaboration. 
 Query: "{query}"
 
@@ -71,7 +69,6 @@ Respond with either:
 - If invalid: "INVALID: <explanation of what kind of queries are expected>"
 """
 
-        # Ollama API request payload for evaluation
         payload = {
             "model": self.response_model,
             "messages": [
@@ -84,17 +81,11 @@ Respond with either:
         }
 
         try:
-            # Send request to Ollama
             response = requests.post(self.ollama_url, json=payload)
             response.raise_for_status()
-            
-            # Extract response
             evaluation = response.json()['message']['content']
-            
-            # Parse the evaluation
             is_valid = evaluation.startswith("VALID:")
-            message = evaluation[7:].strip()  # Remove "VALID: " or "INVALID: " prefix
-            
+            message = evaluation[7:].strip()
             return is_valid, message
 
         except requests.RequestException as e:
@@ -103,70 +94,67 @@ Respond with either:
 
     def _populate_database(self):
         """
-        Embed and store researcher expertise chunks in ChromaDB.
+        Embed paper summaries with researcher metadata in ChromaDB.
         """
         try:
-            # Delete collection if it exists
             try:
-                self.chroma_client.delete_collection("researcher_expertises")
+                self.chroma_client.delete_collection("researcher_papers")
             except:
                 pass
 
-            # Create new collection
             self.collection = self.chroma_client.create_collection(
-                name="researcher_expertises", 
+                name="researcher_papers", 
                 metadata={"hnsw:space": "cosine"}
             )
 
             document_ids = []
             embeddings = []
             metadatas = []
+            documents = []
             
-            for researcher, expertise in self.expertise_data.items():
-                chunks = self._chunk_expertise(expertise)
-                
-                for i, chunk in enumerate(chunks):
-                    # Create unique ID
-                    doc_id = f"{researcher}_{i}"
-                    document_ids.append(doc_id)
-                    
-                    # Embed chunk
-                    embedding = self.model.encode(chunk).tolist()
-                    embeddings.append(embedding)
-                    
-                    # Store metadata
-                    metadatas.append({
-                        "researcher": researcher,
-                        "original_text": chunk
-                    })
+            for researcher, publications in self.expertise_data.items():
+                for i, pub in enumerate(publications):
+                    if "summary" in pub:
+                        # Create unique ID
+                        doc_id = f"{researcher}_{i}"
+                        document_ids.append(doc_id)
+                        
+                        # Get the summary
+                        summary = pub["summary"]
+                        documents.append(summary)
+                        
+                        # Embed summary
+                        embedding = self.model.encode(summary).tolist()
+                        embeddings.append(embedding)
+                        
+                        # Store metadata
+                        metadatas.append({
+                            "researcher": researcher,
+                            "year": pub.get("year", "Unknown"),
+                            "url": pub.get("url", ""),
+                            "doi": pub.get("doi", ""),
+                            "keywords": ", ".join(pub.get("keywords", [])),
+                            "abstract": pub.get("abstract", "")
+                        })
 
-            # Add to collection
-            self.collection.add(
-                ids=document_ids,
-                embeddings=embeddings,
-                metadatas=metadatas
-            )
-            logger.info(f"Successfully populated database with {len(document_ids)} chunks")
+            if document_ids:
+                self.collection.add(
+                    ids=document_ids,
+                    embeddings=embeddings,
+                    documents=documents,
+                    metadatas=metadatas
+                )
+                logger.info(f"Successfully populated database with {len(document_ids)} paper summaries")
+            else:
+                logger.warning("No paper summaries found to populate the database")
         except Exception as e:
             logger.error(f"Error populating database: {str(e)}")
             raise
 
-    def _chunk_expertise(self, expertise_text: str) -> list:
-        """
-        Split researcher expertise into meaningful chunks.
-        """
-        chunks = [
-            chunk.strip() for chunk in expertise_text.split('\n') 
-            if chunk.strip() and len(chunk.strip()) > 30
-        ]
-        return chunks
-
     def search_expertise(self, query: str, top_k: int = 5) -> dict:
         """
-        Search for researchers with similar expertise and generate a comprehensive response.
-        First evaluates if the query is appropriate for expertise search.
+        Search for similar paper summaries and generate expertise summary.
         """
-        # Evaluate query first
         is_valid_query, evaluation_message = self._evaluate_query(query)
         
         if not is_valid_query:
@@ -178,39 +166,39 @@ Respond with either:
             }
 
         try:
-            # Proceed with search if query is valid
-            # Embed query
             query_embedding = self.model.encode(query).tolist()
             
-            # Perform search
             results = self.collection.query(
                 query_embeddings=[query_embedding],
-                n_results=top_k
+                n_results=top_k,
+                include=["documents", "metadatas", "distances"]
             )
 
             # Group results by researcher
-            researcher_expertise = defaultdict(list)
+            researcher_papers = defaultdict(list)
             researcher_scores = defaultdict(list)
             
             for i in range(len(results['ids'][0])):
                 researcher = results['metadatas'][0][i]['researcher']
-                expertise = results['metadatas'][0][i]['original_text']
+                paper_summary = results['documents'][0][i]
                 score = results['distances'][0][i]
+                metadata = results['metadatas'][0][i]
                 
-                researcher_expertise[researcher].append(expertise)
+                researcher_papers[researcher].append({
+                    'summary': paper_summary,
+                    'metadata': metadata
+                })
                 researcher_scores[researcher].append(score)
 
             # Create consolidated results
             formatted_results = []
-            for researcher in researcher_expertise:
-                # Calculate average similarity score
+            for researcher in researcher_papers:
                 avg_score = sum(researcher_scores[researcher]) / len(researcher_scores[researcher])
-                # Combine all expertise chunks
-                combined_expertise = ' '.join(researcher_expertise[researcher])
+                papers = researcher_papers[researcher]
                 
                 formatted_results.append({
                     'researcher': researcher,
-                    'expertise_chunk': combined_expertise,
+                    'papers': papers,
                     'similarity_score': avg_score
                 })
 
@@ -237,30 +225,32 @@ Respond with either:
 
     def _generate_ollama_response(self, query: str, search_results: list) -> str:
         """
-        Generate a comprehensive response using Ollama/Llama3.
+        Generate expertise summary based on similar paper summaries.
         """
-        # Construct prompt with context and researcher data
-        prompt = f"""Based on the following query and researcher expertise information, generate a response that provides one comprehensive summary for each researcher. Each researcher should be mentioned exactly once.
+        prompt = f"""Based on the following research paper summaries, generate a comprehensive expertise profile for each researcher. Focus on their core research areas and methodological strengths.
 
 Query: {query}
 
-Context:
+Paper Summaries:
 """
         for result in search_results:
-            prompt += f"Researcher: {result['researcher']}\n"
-            prompt += f"Expertise: {result['expertise_chunk']}\n\n"
+            prompt += f"\nResearcher: {result['researcher']}\n"
+            for paper in result['papers']:
+                prompt += f"- {paper['summary']}\n"
+                if paper['metadata']['keywords']:
+                    prompt += f"  Keywords: {paper['metadata']['keywords']}\n"
         
-        prompt += """Generate a response that:
+        prompt += """
+Generate a response that:
 1. Creates ONE detailed paragraph per researcher
 2. Starts each paragraph with the researcher's name in bold using HTML tags (<strong>Name</strong>)
-3. Provides a comprehensive summary of their expertise related to the query
-4. Highlights key insights and potential collaborations
+3. Synthesizes their expertise based on the paper summaries
+4. Focuses on recurring themes and methodological approaches
 5. Ensures each researcher is mentioned exactly once
 6. Maintains a clear and professional tone
 
-Important: Do not repeat researchers or split their expertise across multiple paragraphs."""
+Important: Focus on the expertise demonstrated in the papers, not individual paper summaries."""
 
-        # Ollama API request payload
         payload = {
             "model": self.response_model,
             "messages": [
@@ -273,11 +263,8 @@ Important: Do not repeat researchers or split their expertise across multiple pa
         }
 
         try:
-            # Send request to Ollama
             response = requests.post(self.ollama_url, json=payload)
             response.raise_for_status()
-            
-            # Extract response
             generated_text = response.json()['message']['content']
             return generated_text
 
@@ -290,17 +277,12 @@ def run_cli_mode(expertise_data_path: str, query: str):
     Run the RAG system in CLI mode with a single query.
     """
     try:
-        # Load expertise data
         with open(expertise_data_path, 'r') as f:
             expertise_data = json.load(f)
         
-        # Initialize RAG system
         rag_system = ResearcherExpertiseRAG(expertise_data=expertise_data)
-        
-        # Process query
         result = rag_system.search_expertise(query)
         
-        # Print results
         if result['is_valid']:
             print("\nQuery Results:")
             print("-" * 80)
@@ -313,7 +295,10 @@ def run_cli_mode(expertise_data_path: str, query: str):
             for r in result['search_results']:
                 print(f"\nResearcher: {r['researcher']}")
                 print(f"Similarity Score: {r['similarity_score']:.4f}")
-                print(f"Expertise: {r['expertise_chunk'][:200]}...")
+                for paper in r['papers']:
+                    print(f"\nPaper Summary: {paper['summary']}")
+                    if paper['metadata']['keywords']:
+                        print(f"Keywords: {paper['metadata']['keywords']}")
         else:
             print("\nInvalid Query:")
             print(result['generated_response'])
@@ -325,37 +310,46 @@ def run_cli_mode(expertise_data_path: str, query: str):
 app = Flask(__name__)
 CORS(app)
 
-# Load JSON data for web mode
-json_data = {}
-expertise_file = os.path.join('output', 'publications_data_expertise_summary.json')
-try:
-    if os.path.exists(expertise_file):
-        with open(expertise_file, 'r') as f:
-            json_data = json.load(f)
-            logger.info(f"Successfully loaded expertise data from {expertise_file}")
-    else:
-        logger.warning(f"Expertise data file not found at {expertise_file}")
-except Exception as e:
-    logger.error(f"Error loading expertise data: {str(e)}")
+# Global variable for RAG system
+rag_system = None
 
-# Initialize RAG system for web mode
-try:
-    rag_system = ResearcherExpertiseRAG(expertise_data=json_data)
-    logger.info("Successfully initialized RAG system")
-except Exception as e:
-    logger.error(f"Error initializing RAG system: {str(e)}")
-    raise
+def initialize_rag_system():
+    """Initialize or reinitialize the RAG system with fresh data."""
+    global rag_system
+    expertise_file = os.path.join('output', 'publications_data_expertise.json')
+    try:
+        if os.path.exists(expertise_file):
+            with open(expertise_file, 'r') as f:
+                json_data = json.load(f)
+                logger.info(f"Successfully loaded expertise data from {expertise_file}")
+                rag_system = ResearcherExpertiseRAG(expertise_data=json_data)
+                logger.info("Successfully initialized RAG system")
+        else:
+            logger.error(f"Expertise data file not found at {expertise_file}")
+            raise FileNotFoundError(f"Expertise data file not found at {expertise_file}")
+    except Exception as e:
+        logger.error(f"Error initializing RAG system: {str(e)}")
+        raise
 
 @app.route('/')
 def index():
+    # Ensure RAG system is initialized
+    global rag_system
+    if rag_system is None:
+        initialize_rag_system()
     return render_template('index.html')
 
 @app.route('/chat', methods=['POST'])
 def chat():
+    global rag_system
     data = request.json
     query = data.get('message', '')
     
     try:
+        # Ensure RAG system is initialized
+        if rag_system is None:
+            initialize_rag_system()
+            
         # Perform RAG search and generate response
         result = rag_system.search_expertise(query)
         
@@ -375,7 +369,6 @@ def chat():
         }), 500
 
 if __name__ == '__main__':
-    # Parse command line arguments
     parser = argparse.ArgumentParser(description='Researcher Expertise RAG System')
     parser.add_argument('--cli', action='store_true', help='Run in CLI mode')
     parser.add_argument('--data', type=str, help='Path to expertise data JSON file')
@@ -391,4 +384,6 @@ if __name__ == '__main__':
             exit(1)
         run_cli_mode(args.data, args.query)
     else:
+        # Initialize RAG system before starting the server
+        initialize_rag_system()
         app.run(debug=True, port=args.port)
