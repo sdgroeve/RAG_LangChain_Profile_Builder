@@ -3,9 +3,24 @@ import unicodedata
 import re
 import json
 import argparse
+import logging
+import os
 from bs4 import BeautifulSoup
 from datetime import datetime
 from langchain_ollama import OllamaLLM
+
+# Suppress Ollama HTTP logging
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
+# Set up logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('parse_publications.log'),
+        logging.StreamHandler()
+    ]
+)
 
 def normalize_name(name):
     """Normalizes a name by replacing special characters with their base equivalents."""
@@ -38,7 +53,8 @@ def check_url_exists(url):
     try:
         response = requests.head(url, allow_redirects=True, timeout=5)
         return response.status_code == 200
-    except requests.RequestException:
+    except requests.RequestException as e:
+        logging.error(f"Failed to check URL {url}: {str(e)}")
         return False
 
 def extract_author_position(soup, researcher_surname):
@@ -91,7 +107,8 @@ def extract_publication_details(publication_url, researcher_surname):
                 "classification": classification_text,
                 "keywords": keywords,
             }
-    except requests.RequestException:
+    except requests.RequestException as e:
+        logging.error(f"Failed to extract details from {publication_url}: {str(e)}")
         return None
     
 def extract_publication_urls(publications_url):
@@ -114,19 +131,25 @@ def extract_publication_urls(publications_url):
                     if current_year - publication_year <= 9:
                         publications.append((publication_url, publication_year))
             return publications
+        logging.error(f"Failed to fetch publications from {publications_url}: Status code {response.status_code}")
         return []
-    except requests.RequestException:
+    except requests.RequestException as e:
+        logging.error(f"Failed to fetch publications from {publications_url}: {str(e)}")
         return []
 
 def generate_expertise_description(llm, abstract):
     """Generate expertise description using LLM."""
-    prompt = (
-        f"Summarize the key points of this research paper abstract in no more than two sentences, focusing on the task being addressed and the solution proposed, while minimizing emphasis on conclusions or results."
-        f"Just write the summary, don't start with Here is the summary or similar"
-        f"Abstract: {abstract}\n\n"
-    )
-    response = llm(prompt)
-    return response.strip()
+    try:
+        prompt = (
+            f"Summarize the key points of this research paper abstract in no more than two sentences, focusing on the task being addressed and the solution proposed, while minimizing emphasis on conclusions or results."
+            f"Just write the summary, don't start with Here is the summary or similar"
+            f"Abstract: {abstract}\n\n"
+        )
+        response = llm.invoke(prompt)
+        return response.strip()
+    except Exception as e:
+        logging.error(f"Failed to generate expertise description: {str(e)}")
+        return "Failed to generate expertise description"
 
 def main():
     parser = argparse.ArgumentParser(description='Parse publications and generate expertise descriptions')
@@ -137,26 +160,54 @@ def main():
                       help='Output file for expertise data (default: publications_data_expertise.json)')
     args = parser.parse_args()
 
+    # Initialize statistics
+    stats = {
+        "total_researchers": 0,
+        "total_publications_found": 0,
+        "total_publications_parsed": 0,
+        "total_embeddings_generated": 0,
+        "failed_url_checks": 0,
+        "failed_publication_fetches": 0,
+        "failed_embedding_generations": 0,
+        "researchers_with_no_publications": 0
+    }
+
     # Initialize Ollama LLM
-    llm = OllamaLLM(model="llama3", temperature=0)
+    try:
+        llm = OllamaLLM(model="llama3", temperature=0)
+        logging.info("Successfully initialized LLM model")
+    except Exception as e:
+        logging.error(f"Failed to initialize LLM model: {str(e)}")
+        return
     
     # Step 1: Gather publications data
     data = {}
     try:
         with open(args.input_file, "r", encoding="utf-8") as file:
             names = [line.strip() for line in file if line.strip()]
+            stats["total_researchers"] = len(names)
+            logging.info(f"Found {len(names)} researchers in input file")
     except FileNotFoundError:
-        print(f"Error: The file '{args.input_file}' does not exist.")
+        logging.error(f"Error: The file '{args.input_file}' does not exist.")
         return
 
     for name in names:
-        print(name)
+        logging.info(f"Processing researcher: {name}")
         data[name] = []
+        researcher_publications_found = 0
         researcher_surname = name.split()[-1]
+        
         possible_urls = construct_possible_urls(name)
+        url_found = False
         for url in possible_urls:
             if check_url_exists(url):
+                url_found = True
                 publication_links = extract_publication_urls(url)
+                stats["total_publications_found"] += len(publication_links)
+                researcher_publications_found = len(publication_links)
+                logging.info(f"Found {len(publication_links)} publications for {name}")
+                
+                successful_parses = 0
                 for pub_url, pub_year in publication_links:
                     details = extract_publication_details(pub_url, researcher_surname)
                     if details and details.get("classification") == "A1":
@@ -165,26 +216,57 @@ def main():
                             "url": pub_url,
                             **details
                         })
+                        successful_parses += 1
+                    else:
+                        stats["failed_publication_fetches"] += 1
+                
+                stats["total_publications_parsed"] += successful_parses
+                logging.info(f"Successfully parsed {successful_parses} A1 publications for {name}")
                 break
+            else:
+                stats["failed_url_checks"] += 1
+        
+        if not url_found:
+            logging.warning(f"No valid URL found for researcher: {name}")
+            stats["researchers_with_no_publications"] += 1
 
     # Save initial publications data
     with open(args.publications, "w", encoding="utf-8") as json_file:
         json.dump(data, json_file, indent=4, ensure_ascii=False)
-    print(f"Publications data saved to '{args.publications}'")
+    logging.info(f"Publications data saved to '{args.publications}'")
 
     # Step 2: Generate expertise descriptions
     for author, publications in data.items():
-        print(author)
+        logging.info(f"Generating expertise descriptions for {author}")
+        successful_embeddings = 0
         for pub in publications:
             abstract = pub.get("abstract", "")
             if abstract:
                 expertise = generate_expertise_description(llm, abstract)
-                pub["summary"] = expertise
+                if expertise != "Failed to generate expertise description":
+                    pub["summary"] = expertise
+                    successful_embeddings += 1
+                else:
+                    stats["failed_embedding_generations"] += 1
+        
+        stats["total_embeddings_generated"] += successful_embeddings
+        logging.info(f"Generated {successful_embeddings} expertise descriptions for {author}")
 
     # Save updated publications data with expertise
     with open(args.expertise, "w", encoding="utf-8") as json_file:
         json.dump(data, json_file, indent=4, ensure_ascii=False)
-    print(f"Publications data with expertise saved to '{args.expertise}'")
+    logging.info(f"Publications data with expertise saved to '{args.expertise}'")
+
+    # Log final statistics
+    logging.info("\n=== Final Statistics ===")
+    logging.info(f"Total researchers processed: {stats['total_researchers']}")
+    logging.info(f"Total publications found: {stats['total_publications_found']}")
+    logging.info(f"Total A1 publications successfully parsed: {stats['total_publications_parsed']}")
+    logging.info(f"Total expertise descriptions generated: {stats['total_embeddings_generated']}")
+    logging.info(f"Failed URL checks: {stats['failed_url_checks']}")
+    logging.info(f"Failed publication fetches: {stats['failed_publication_fetches']}")
+    logging.info(f"Failed expertise generations: {stats['failed_embedding_generations']}")
+    logging.info(f"Researchers with no publications found: {stats['researchers_with_no_publications']}")
 
 if __name__ == "__main__":
     main()

@@ -49,51 +49,49 @@ ollama pull llama3
 }
 ```
 
-## Data Preparation Scripts
+## Data Preparation
 
-The system includes two scripts for preparing researcher expertise data:
+The system includes a comprehensive script for preparing researcher expertise data:
 
-### hint2publications.py
+### parse_publications.py
 
-This script extracts publication data from UGent's research portal for specified researchers. It focuses on:
-- Retrieving publications where the researcher is either first or last author
-- Filtering for A1 journal articles from the past 9 years
-- Extracting key information including:
-  - Abstract
-  - Publication type
-  - DOI
-  - UGent classification
-  - Keywords
+This script handles the complete pipeline of extracting publication data and generating expertise descriptions. It combines publication retrieval and expertise generation into a single workflow with detailed logging and statistics.
 
-Usage:
-1. Create a text file with researcher names (one per line) in the `researchers` directory
-2. Update the input and output file paths in the script:
-```python
-input_file = "researchers/test.researchers.txt"
-output_json_file = "output/test.publications_data.json"
-```
-3. Run the script:
-```bash
-python hint2publications.py
-```
+Features:
+- Retrieves publications from UGent's research portal
+- Filters for publications where the researcher is first or last author
+- Focuses on A1 journal articles from the past 9 years
+- Generates expertise descriptions using Ollama/Llama3
+- Provides detailed statistics and logging of the entire process
 
-### generate_expertise.py
-
-This script processes the publication data extracted by hint2publications.py to generate expertise summaries using Ollama/Llama3. It performs:
-- Generation of concise summaries for each publication's abstract
-- Creation of comprehensive expertise profiles by analyzing patterns across a researcher's publications
-- Output of both individual publication summaries and overall researcher expertise profiles
+The script extracts and processes:
+- Abstract
+- Publication type
+- DOI
+- UGent classification
+- Keywords
+- Generated expertise summaries
 
 Usage:
-1. Ensure hint2publications.py has been run first to generate the publication data
-2. Run the script:
 ```bash
-python generate_expertise.py
+python parse_publications.py researchers/input.txt [--publications output_publications.json] [--expertise output_expertise.json]
 ```
 
-The script generates two output files:
-- `output/test.publications_data_expertise.json`: Contains the original publication data enhanced with individual paper summaries
-- `output/test.publications_data_expertise_summary.json`: Contains the final expertise profiles for each researcher
+Parameters:
+- `input.txt`: Text file with researcher names (one per line)
+- `--publications`: Output file for raw publication data (default: publications_data.json)
+- `--expertise`: Output file for publication data with expertise summaries (default: publications_data_expertise.json)
+
+The script provides detailed logging of:
+- Total researchers processed
+- Total publications found and successfully parsed
+- Number of expertise descriptions generated
+- Failed operations (URL checks, publication fetches, etc.)
+- Researchers with no publications found
+
+Output files:
+- Publications data file: Contains the raw publication data
+- Expertise data file: Contains the publication data enhanced with expertise summaries
 
 ## Usage
 

@@ -316,7 +316,7 @@ rag_system = None
 def initialize_rag_system():
     """Initialize or reinitialize the RAG system with fresh data."""
     global rag_system
-    expertise_file = os.path.join('output', 'publications_data_expertise.json')
+    expertise_file = os.path.join('output', 'test.publications_data_expertise.json')
     try:
         if os.path.exists(expertise_file):
             with open(expertise_file, 'r') as f:
