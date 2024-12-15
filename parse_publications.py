@@ -169,7 +169,8 @@ def main():
         "failed_url_checks": 0,
         "failed_publication_fetches": 0,
         "failed_embedding_generations": 0,
-        "researchers_with_no_publications": 0
+        "researchers_with_no_publications": 0,
+        "failed_researcher_urls": []  # New: Track researchers whose URLs all failed
     }
 
     # Initialize Ollama LLM
@@ -229,6 +230,8 @@ def main():
         if not url_found:
             logging.warning(f"No valid URL found for researcher: {name}")
             stats["researchers_with_no_publications"] += 1
+            # Add all attempted URLs for this researcher to the failed list
+            stats["failed_researcher_urls"].extend(possible_urls)
 
     # Save initial publications data
     with open(args.publications, "w", encoding="utf-8") as json_file:
@@ -267,6 +270,12 @@ def main():
     logging.info(f"Failed publication fetches: {stats['failed_publication_fetches']}")
     logging.info(f"Failed expertise generations: {stats['failed_embedding_generations']}")
     logging.info(f"Researchers with no publications found: {stats['researchers_with_no_publications']}")
+    
+    # Log list of failed URLs
+    if stats["failed_researcher_urls"]:
+        logging.info("\n=== Failed URLs ===")
+        for url in stats["failed_researcher_urls"]:
+            logging.info(url)
 
 if __name__ == "__main__":
     main()
