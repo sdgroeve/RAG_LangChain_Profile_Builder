@@ -8,6 +8,7 @@ import chromadb
 from sentence_transformers import SentenceTransformer
 import requests
 from collections import defaultdict
+from difflib import get_close_matches
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -22,6 +23,7 @@ class ResearcherExpertiseRAG:
         Initialize the RAG system with researcher expertise data and Ollama integration.
         """
         self.expertise_data = expertise_data
+        self.researcher_names = list(expertise_data.keys())
         self.model = SentenceTransformer(embedding_model)
         
         # Ollama configuration
@@ -36,6 +38,83 @@ class ResearcherExpertiseRAG:
         
         # Populate database once during initialization
         self._populate_database()
+
+    def get_researcher_suggestions(self, query: str, max_suggestions: int = 5) -> list:
+        """
+        Get researcher name suggestions based on a partial query.
+        Uses fuzzy matching to find similar names.
+        """
+        if not query:
+            return []
+            
+        # Convert query to lowercase for case-insensitive matching
+        query_lower = query.lower()
+        
+        # First try direct startswith matching
+        direct_matches = [
+            name for name in self.researcher_names 
+            if name.lower().startswith(query_lower)
+        ]
+        
+        # If we have enough direct matches, return them
+        if len(direct_matches) >= max_suggestions:
+            return direct_matches[:max_suggestions]
+            
+        # Otherwise, use fuzzy matching to find similar names
+        all_matches = set(direct_matches)
+        
+        # Get fuzzy matches
+        fuzzy_matches = get_close_matches(
+            query, 
+            [name for name in self.researcher_names if name not in all_matches],
+            n=max_suggestions - len(all_matches),
+            cutoff=0.6
+        )
+        
+        all_matches.update(fuzzy_matches)
+        
+        # Also check for substring matches
+        substring_matches = [
+            name for name in self.researcher_names 
+            if query_lower in name.lower() and name not in all_matches
+        ]
+        
+        all_matches.update(substring_matches[:max_suggestions - len(all_matches)])
+        
+        return sorted(list(all_matches))[:max_suggestions]
+
+    def get_researcher_expertise(self, researcher_name: str) -> dict:
+        """
+        Get expertise details for a specific researcher.
+        Includes fuzzy matching for researcher names.
+        """
+        # First try exact match
+        print(researcher_name)
+        print(self.expertise_data.keys())
+        if researcher_name in self.expertise_data:
+            return {
+                'researcher': researcher_name,
+                'publications': self.expertise_data[researcher_name]
+            }
+            
+        # Try case-insensitive match
+        for name in self.expertise_data:
+            if name.lower() == researcher_name.lower():
+                return {
+                    'researcher': name,
+                    'publications': self.expertise_data[name]
+                }
+                
+        # Try fuzzy matching
+        matches = get_close_matches(researcher_name, self.researcher_names, n=1, cutoff=0.6)
+        if matches:
+            matched_name = matches[0]
+            return {
+                'researcher': matched_name,
+                'publications': self.expertise_data[matched_name]
+            }
+            
+        return None
 
     def _test_ollama_connection(self):
         """
@@ -316,12 +395,36 @@ rag_system = None
 def initialize_rag_system():
     """Initialize or reinitialize the RAG system with fresh data."""
     global rag_system
-    expertise_file = os.path.join('output', 'test.publications_data_expertise.json')
+    expertise_file = os.path.join('output', 'publications_data_expertise.json')
+    researchers_file = os.path.join('researchers', 'hint.researchers.txt')
+    
     try:
+        # Read researchers list
+        with open(researchers_file, 'r') as f:
+            researchers = set(line.strip() for line in f)
+        logger.info(f"Loaded {len(researchers)} researchers from {researchers_file}")
+        
+        # Load expertise data
         if os.path.exists(expertise_file):
             with open(expertise_file, 'r') as f:
                 json_data = json.load(f)
                 logger.info(f"Successfully loaded expertise data from {expertise_file}")
+                
+                # Calculate statistics
+                researchers_with_data = set(json_data.keys())
+                researchers_without_data = researchers - researchers_with_data
+                
+                # Log statistics
+                logger.info(f"Total number of researchers: {len(researchers)}")
+                logger.info(f"Number of researchers with data: {len(researchers_with_data)}")
+                logger.info(f"Number of researchers without data: {len(researchers_without_data)}")
+                
+                # Log researchers without data
+                if researchers_without_data:
+                    logger.info("Researchers without data:")
+                    for researcher in sorted(researchers_without_data):
+                        logger.info(f"  - {researcher}")
+                
                 rag_system = ResearcherExpertiseRAG(expertise_data=json_data)
                 logger.info("Successfully initialized RAG system")
         else:
@@ -366,6 +469,55 @@ def chat():
         return jsonify({
             'message': f"An error occurred: {str(e)}",
             'search_results': []
+        }), 500
+
+@app.route('/expertise', methods=['POST'])
+def expertise():
+    global rag_system
+    data = request.json
+    researcher = data.get('researcher', '')
+    
+    try:
+        # Ensure RAG system is initialized
+        if rag_system is None:
+            initialize_rag_system()
+            
+        # Get researcher expertise details
+        result = rag_system.get_researcher_expertise(researcher)
+        
+        if result:
+            return jsonify(result)
+        else:
+            return jsonify({
+                'error': f'No expertise data found for researcher: {researcher}'
+            }), 404
+    
+    except Exception as e:
+        logger.error(f"Error processing expertise request: {str(e)}")
+        return jsonify({
+            'error': f"An error occurred: {str(e)}"
+        }), 500
+
+@app.route('/suggest', methods=['POST'])
+def suggest():
+    global rag_system
+    data = request.json
+    query = data.get('query', '')
+    
+    try:
+        # Ensure RAG system is initialized
+        if rag_system is None:
+            initialize_rag_system()
+            
+        # Get researcher suggestions
+        suggestions = rag_system.get_researcher_suggestions(query)
+        return jsonify({'suggestions': suggestions})
+    
+    except Exception as e:
+        logger.error(f"Error processing suggestion request: {str(e)}")
+        return jsonify({
+            'error': f"An error occurred: {str(e)}",
+            'suggestions': []
         }), 500
 
 if __name__ == '__main__':

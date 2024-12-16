@@ -211,7 +211,7 @@ def main():
                 successful_parses = 0
                 for pub_url, pub_year in publication_links:
                     details = extract_publication_details(pub_url, researcher_surname)
-                    if details and details.get("classification") == "A1":
+                    if details:
                         data[name].append({
                             "year": pub_year,
                             "url": pub_url,
@@ -222,7 +222,7 @@ def main():
                         stats["failed_publication_fetches"] += 1
                 
                 stats["total_publications_parsed"] += successful_parses
-                logging.info(f"Successfully parsed {successful_parses} A1 publications for {name}")
+                logging.info(f"Successfully parsed {successful_parses} publications for {name}")
                 break
             else:
                 stats["failed_url_checks"] += 1
@@ -264,7 +264,7 @@ def main():
     logging.info("\n=== Final Statistics ===")
     logging.info(f"Total researchers processed: {stats['total_researchers']}")
     logging.info(f"Total publications found: {stats['total_publications_found']}")
-    logging.info(f"Total A1 publications successfully parsed: {stats['total_publications_parsed']}")
+    logging.info(f"Total publications successfully parsed: {stats['total_publications_parsed']}")
     logging.info(f"Total expertise descriptions generated: {stats['total_embeddings_generated']}")
     logging.info(f"Failed URL checks: {stats['failed_url_checks']}")
     logging.info(f"Failed publication fetches: {stats['failed_publication_fetches']}")

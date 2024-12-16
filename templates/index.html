@@ -6,34 +6,126 @@
     <title>Researcher Expertise Chat</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        .suggestions-container {
+            position: absolute;
+            width: 100%;
+            max-height: 200px;
+            overflow-y: auto;
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-top: none;
+            border-radius: 0 0 0.5rem 0.5rem;
+            z-index: 10;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+        .suggestion-item {
+            padding: 0.75rem 1rem;
+            cursor: pointer;
+        }
+        .suggestion-item:hover {
+            background-color: #f3f4f6;
+        }
+        .suggestion-item.selected {
+            background-color: #e5e7eb;
+        }
+    </style>
 </head>
 <body class="bg-gray-100 flex flex-col h-screen">
     <div class="flex-grow container mx-auto max-w-4xl px-4 py-8 flex flex-col">
-        <div id="chat-container" class="flex-grow bg-white rounded-lg shadow-md mb-4 overflow-y-auto p-4">
-            <div id="chat-messages" class="space-y-4">
-                <div class="text-center text-gray-500 py-4">
-                    Researcher Expertise Chat
-                </div>
+        <!-- Tab Navigation -->
+        <div class="mb-4">
+            <div class="border-b border-gray-200">
+                <nav class="-mb-px flex" aria-label="Tabs">
+                    <button class="tab-btn active bg-white inline-flex items-center h-10 px-4 py-2 border-b-2 border-gray-700 text-sm font-medium text-gray-700" data-tab="chat">
+                        <i class="fas fa-comments mr-2"></i>
+                        Chat
+                    </button>
+                    <button class="tab-btn bg-white inline-flex items-center h-10 px-4 py-2 border-b-2 border-transparent text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300" data-tab="expertise">
+                        <i class="fas fa-search mr-2"></i>
+                        Expertise Search
+                    </button>
+                </nav>
             </div>
         </div>
-        
-        <div class="chat-input-area flex">
-            <input 
-                type="text" 
-                id="user-input" 
-                placeholder="Ask about researcher expertise..." 
-                class="flex-grow p-3 border rounded-l-lg focus:outline-none focus:ring-2 focus:ring-gray-500"
-            >
-            <button 
-                id="send-btn" 
-                class="bg-gray-700 text-white px-4 py-3 rounded-r-lg hover:bg-gray-800 transition"
-            >
-                <i class="fas fa-paper-plane"></i>
-            </button>
+
+        <!-- Chat Tab -->
+        <div id="chat-tab" class="tab-content flex-grow flex flex-col">
+            <div id="chat-container" class="flex-grow bg-white rounded-lg shadow-md mb-4 overflow-y-auto p-4">
+                <div id="chat-messages" class="space-y-4">
+                    <div class="text-center text-gray-500 py-4">
+                        Researcher Expertise Chat
+                    </div>
+                </div>
+            </div>
+            
+            <div class="chat-input-area flex">
+                <input 
+                    type="text" 
+                    id="user-input" 
+                    placeholder="Ask about researcher expertise..." 
+                    class="flex-grow p-3 border rounded-l-lg focus:outline-none focus:ring-2 focus:ring-gray-500"
+                >
+                <button 
+                    id="send-btn" 
+                    class="bg-gray-700 text-white px-4 py-3 rounded-r-lg hover:bg-gray-800 transition"
+                >
+                    <i class="fas fa-paper-plane"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Expertise Tab -->
+        <div id="expertise-tab" class="tab-content hidden flex-grow flex flex-col">
+            <div class="mb-4 flex relative">
+                <div class="flex-grow relative">
+                    <input 
+                        type="text" 
+                        id="expertise-search" 
+                        placeholder="Search for a researcher..." 
+                        class="w-full p-3 border rounded-l-lg focus:outline-none focus:ring-2 focus:ring-gray-500"
+                        autocomplete="off"
+                    >
+                    <div id="suggestions-container" class="suggestions-container hidden"></div>
+                </div>
+                <button 
+                    id="search-btn" 
+                    class="bg-gray-700 text-white px-4 py-3 rounded-r-lg hover:bg-gray-800 transition"
+                >
+                    <i class="fas fa-search"></i>
+                </button>
+            </div>
+            
+            <div id="expertise-results" class="flex-grow bg-white rounded-lg shadow-md overflow-y-auto p-4">
+                <div class="text-center text-gray-500 py-4">
+                    Search for a researcher to view their expertise details
+                </div>
+            </div>
         </div>
     </div>
 
     <script>
+        // Tab Switching Logic
+        const tabBtns = document.querySelectorAll('.tab-btn');
+        const tabContents = document.querySelectorAll('.tab-content');
+
+        tabBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                // Remove active class from all buttons and tabs
+                tabBtns.forEach(b => {
+                    b.classList.remove('active', 'border-gray-700', 'text-gray-700');
+                    b.classList.add('border-transparent', 'text-gray-500');
+                });
+                tabContents.forEach(content => content.classList.add('hidden'));
+
+                // Add active class to clicked button and show corresponding tab
+                btn.classList.add('active', 'border-gray-700', 'text-gray-700');
+                btn.classList.remove('border-transparent', 'text-gray-500');
+                document.getElementById(`${btn.dataset.tab}-tab`).classList.remove('hidden');
+            });
+        });
+
+        // Chat Logic
         const chatContainer = document.getElementById('chat-messages');
         const userInput = document.getElementById('user-input');
         const sendBtn = document.getElementById('send-btn');
@@ -74,15 +166,9 @@
         }
 
         function formatAIResponse(content) {
-            // Convert markdown bold to HTML bold
             content = content.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-            
-            // Split content by double newlines to identify paragraphs
             const paragraphs = content.split(/\n\n+/);
-            
-            // Format each paragraph with proper styling
             return paragraphs.map(para => {
-                // Check if paragraph starts with common section indicators
                 if (para.toLowerCase().startsWith('summary:') || 
                     para.toLowerCase().startsWith('analysis:') ||
                     para.toLowerCase().startsWith('recommendation:') ||
@@ -127,10 +213,8 @@
                 chatContainer.removeChild(loadingMessage);
                 
                 if (!data.search_results || data.search_results.length === 0) {
-                    // Invalid query
                     addMessage(data.message, 'invalid');
                 } else {
-                    // Valid query with response
                     addMessage(data.message, 'ai');
                 }
             })
@@ -149,6 +233,226 @@
         userInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
                 sendMessage();
+            }
+        });
+
+        // Expertise Search Logic
+        const expertiseSearch = document.getElementById('expertise-search');
+        const searchBtn = document.getElementById('search-btn');
+        const expertiseResults = document.getElementById('expertise-results');
+        const suggestionsContainer = document.getElementById('suggestions-container');
+        let selectedSuggestionIndex = -1;
+        let suggestions = [];
+
+        function displayExpertiseResults(data) {
+            if (!data || !data.publications || data.publications.length === 0) {
+                expertiseResults.innerHTML = `
+                    <div class="text-center text-gray-500 py-4">
+                        No expertise data found for this researcher
+                    </div>
+                `;
+                return;
+            }
+
+            // Group publications by year
+            const publicationsByYear = data.publications.reduce((acc, pub) => {
+                const year = pub.year || 'Unknown Year';
+                if (!acc[year]) acc[year] = [];
+                acc[year].push(pub);
+                return acc;
+            }, {});
+
+            // Create HTML for results
+            let html = `
+                <div class="mb-6">
+                    <h2 class="text-2xl font-bold text-gray-800 mb-2">${data.researcher}</h2>
+                    <div class="text-sm text-gray-600 mb-4">
+                        Total Publications: ${data.publications.length}
+                    </div>
+                </div>
+            `;
+
+            // Sort years in descending order
+            const sortedYears = Object.keys(publicationsByYear).sort((a, b) => b - a);
+
+            sortedYears.forEach(year => {
+                html += `
+                    <div class="mb-6">
+                        <h3 class="text-xl font-semibold text-gray-700 mb-3">${year}</h3>
+                        <div class="space-y-4">
+                `;
+
+                publicationsByYear[year].forEach(pub => {
+                    const keywords = pub.keywords && pub.keywords.length > 0
+                        ? `<div class="mt-2">
+                            <span class="font-medium">Keywords:</span>
+                            <div class="flex flex-wrap gap-2 mt-1">
+                                ${pub.keywords.map(kw => 
+                                    `<span class="bg-gray-100 text-gray-700 px-2 py-1 rounded-full text-sm">${kw}</span>`
+                                ).join('')}
+                            </div>
+                           </div>`
+                        : '';
+
+                    html += `
+                        <div class="bg-gray-50 rounded-lg p-4">
+                            <div class="mb-2">
+                                <a href="${pub.url}" target="_blank" class="text-blue-600 hover:text-blue-800 font-medium">
+                                    ${pub.expertise || 'No expertise information available'}
+                                </a>
+                            </div>
+                            ${keywords}
+                            <div class="mt-2 text-sm text-gray-600">
+                                <span class="font-medium">DOI:</span> 
+                                <a href="${pub.doi}" target="_blank" class="text-blue-600 hover:text-blue-800">
+                                    ${pub.doi}
+                                </a>
+                            </div>
+                        </div>
+                    `;
+                });
+
+                html += `
+                        </div>
+                    </div>
+                `;
+            });
+
+            expertiseResults.innerHTML = html;
+        }
+
+        function updateSuggestions(suggestionsList) {
+            suggestions = suggestionsList;
+            if (!suggestionsList.length) {
+                suggestionsContainer.classList.add('hidden');
+                return;
+            }
+
+            const html = suggestionsList.map((suggestion, index) => `
+                <div class="suggestion-item ${index === selectedSuggestionIndex ? 'selected' : ''}" 
+                     data-index="${index}">
+                    ${suggestion}
+                </div>
+            `).join('');
+
+            suggestionsContainer.innerHTML = html;
+            suggestionsContainer.classList.remove('hidden');
+
+            // Add click handlers to suggestions
+            document.querySelectorAll('.suggestion-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    expertiseSearch.value = item.textContent.trim();
+                    suggestionsContainer.classList.add('hidden');
+                    searchExpertise();
+                });
+            });
+        }
+
+        let debounceTimeout;
+        expertiseSearch.addEventListener('input', () => {
+            clearTimeout(debounceTimeout);
+            const query = expertiseSearch.value.trim();
+            
+            if (!query) {
+                suggestionsContainer.classList.add('hidden');
+                return;
+            }
+
+            debounceTimeout = setTimeout(() => {
+                fetch('/suggest', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ query: query })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.suggestions) {
+                        updateSuggestions(data.suggestions);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching suggestions:', error);
+                });
+            }, 300);
+        });
+
+        // Handle keyboard navigation
+        expertiseSearch.addEventListener('keydown', (e) => {
+            if (suggestions.length === 0) return;
+
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                selectedSuggestionIndex = Math.min(selectedSuggestionIndex + 1, suggestions.length - 1);
+                updateSuggestions(suggestions);
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                selectedSuggestionIndex = Math.max(selectedSuggestionIndex - 1, -1);
+                updateSuggestions(suggestions);
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                if (selectedSuggestionIndex >= 0) {
+                    expertiseSearch.value = suggestions[selectedSuggestionIndex];
+                    suggestionsContainer.classList.add('hidden');
+                }
+                searchExpertise();
+            } else if (e.key === 'Escape') {
+                suggestionsContainer.classList.add('hidden');
+            }
+        });
+
+        // Hide suggestions when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!expertiseSearch.contains(e.target) && !suggestionsContainer.contains(e.target)) {
+                suggestionsContainer.classList.add('hidden');
+            }
+        });
+
+        function searchExpertise() {
+            const query = expertiseSearch.value.trim();
+            if (!query) return;
+
+            suggestionsContainer.classList.add('hidden');
+            expertiseResults.innerHTML = `
+                <div class="text-center text-gray-500 py-4">
+                    <i class="fas fa-spinner fa-spin mr-2"></i>
+                    Searching...
+                </div>
+            `;
+
+            fetch('/expertise', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ researcher: query })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    expertiseResults.innerHTML = `
+                        <div class="text-center text-red-500 py-4">
+                            ${data.error}
+                        </div>
+                    `;
+                } else {
+                    displayExpertiseResults(data);
+                }
+            })
+            .catch(error => {
+                expertiseResults.innerHTML = `
+                    <div class="text-center text-red-500 py-4">
+                        Error: ${error.message}
+                    </div>
+                `;
+            });
+        }
+
+        searchBtn.addEventListener('click', searchExpertise);
+        expertiseSearch.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !suggestionsContainer.querySelector('.selected')) {
+                searchExpertise();
             }
         });
     </script>
