@@ -43,7 +43,11 @@
                     </button>
                     <button class="tab-btn bg-white inline-flex items-center h-10 px-4 py-2 border-b-2 border-transparent text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300" data-tab="expertise">
                         <i class="fas fa-search mr-2"></i>
-                        Researcher Embeddings Search
+                        Researcher Embeddings
+                    </button>
+                    <button class="tab-btn bg-white inline-flex items-center h-10 px-4 py-2 border-b-2 border-transparent text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300" data-tab="help">
+                        <i class="fas fa-question-circle mr-2"></i>
+                        Help
                     </button>
                 </nav>
             </div>
@@ -99,6 +103,89 @@
             <div id="expertise-results" class="flex-grow bg-white rounded-lg shadow-md overflow-y-auto p-4">
                 <div class="text-center text-gray-500 py-4">
                     Search for a researcher to view their expertise details
+                </div>
+            </div>
+        </div>
+
+        <!-- Help Tab -->
+        <div id="help-tab" class="tab-content hidden flex-grow">
+            <div class="bg-white rounded-lg shadow-md p-6 overflow-y-auto">
+                <h2 class="text-2xl font-bold text-gray-800 mb-6">How It Works</h2>
+                
+                <div class="space-y-8">
+                    <!-- Data Collection -->
+                    <section>
+                        <h3 class="text-xl font-semibold text-gray-700 mb-3">Data Collection</h3>
+                        <div class="space-y-2 text-gray-600">
+                            <p>The system collects research data from research.ugent.be by:</p>
+                            <ul class="list-disc pl-5 space-y-1">
+                                <li>Scraping publication data for each researcher</li>
+                                <li>Focusing on publications from the last 9 years</li>
+                                <li>Collecting abstracts, DOIs, keywords, and other metadata</li>
+                                <li>Prioritizing papers where the researcher is first or last author</li>
+                            </ul>
+                        </div>
+                    </section>
+
+                    <!-- Data Processing -->
+                    <section>
+                        <h3 class="text-xl font-semibold text-gray-700 mb-3">Data Processing</h3>
+                        <div class="space-y-2 text-gray-600">
+                            <p>The collected data is processed using:</p>
+                            <ul class="list-disc pl-5 space-y-1">
+                                <li>LLaMA 3 model to generate concise expertise summaries from paper abstracts</li>
+                                <li>Sentence transformers (all-MiniLM-L6-v2) to create embeddings for semantic search</li>
+                                <li>ChromaDB vector database to store and query the embeddings efficiently</li>
+                            </ul>
+                        </div>
+                    </section>
+
+                    <!-- Features -->
+                    <section>
+                        <h3 class="text-xl font-semibold text-gray-700 mb-3">Features</h3>
+                        <div class="space-y-4">
+                            <!-- Chat Tab -->
+                            <div>
+                                <h4 class="font-medium text-gray-700 mb-2">Chat Tab</h4>
+                                <div class="text-gray-600">
+                                    <p>The Chat interface allows you to:</p>
+                                    <ul class="list-disc pl-5 space-y-1">
+                                        <li>Ask natural language questions about researcher expertise</li>
+                                        <li>Get AI-generated responses based on publication data</li>
+                                        <li>Discover researchers working in specific areas</li>
+                                        <li>Understand research themes and methodological approaches</li>
+                                    </ul>
+                                </div>
+                            </div>
+
+                            <!-- Researcher Embeddings Tab -->
+                            <div>
+                                <h4 class="font-medium text-gray-700 mb-2">Researcher Embeddings Tab</h4>
+                                <div class="text-gray-600">
+                                    <p>The Researcher Embeddings tab enables you to:</p>
+                                    <ul class="list-disc pl-5 space-y-1">
+                                        <li>Search for specific researchers by name</li>
+                                        <li>View the AI embedded paper expertise summaries used to match the query</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Technical Details -->
+                    <section>
+                        <h3 class="text-xl font-semibold text-gray-700 mb-3">Technical Implementation</h3>
+                        <div class="space-y-2 text-gray-600">
+                            <p>The system is built using:</p>
+                            <ul class="list-disc pl-5 space-y-1">
+                                <li>Flask backend for API endpoints and serving the web interface</li>
+                                <li>LangChain for orchestrating the LLM interactions</li>
+                                <li>ChromaDB for vector similarity search</li>
+                                <li>Sentence Transformers for generating embeddings</li>
+                                <li>Tailwind CSS for responsive design</li>
+                            </ul>
+                        </div>
+                    </section>
                 </div>
             </div>
         </div>
