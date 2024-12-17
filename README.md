@@ -12,6 +12,8 @@ A Flask-based web application that uses Retrieval-Augmented Generation (RAG) to 
 - 💻 Clean, responsive web interface
 - 🔄 Real-time chat-like interaction
 - 📟 Command-line interface support
+- 💾 Persistent embeddings storage
+- 🔄 On-demand embedding regeneration
 
 ## System Requirements
 
@@ -169,6 +171,11 @@ The system consists of several key components:
    - Responsive design using Tailwind CSS
    - Dynamic message formatting
 
+5. **Embedding Management**
+   - Persistent storage in `embeddings/` directory
+   - Automatic loading of existing embeddings
+   - On-demand regeneration via API endpoint
+
 ### Key Classes
 
 #### ResearcherExpertiseRAG
@@ -179,11 +186,38 @@ Main class handling the RAG system functionality:
 - `search_expertise`: Performs semantic search and generates responses
 - `_evaluate_query`: Validates if queries are expertise-related
 - `_generate_ollama_response`: Creates detailed responses using LLM
+- `_load_embeddings`: Loads persisted embeddings from disk
+- `_save_embeddings`: Saves embeddings to disk for future use
+- `_populate_database`: Generates and stores embeddings
 
 ### API Endpoints
 
 - `GET /`: Serves the main chat interface
 - `POST /chat`: Handles expertise queries and returns AI-generated responses
+- `POST /regenerate-embeddings`: Forces regeneration of embeddings
+
+### Embedding Management
+
+The system now includes persistent storage of embeddings to improve startup time and resource usage:
+
+1. **Storage Location**
+   - Embeddings are stored in the `embeddings/` directory
+   - Default file: `embeddings/embeddings.pkl`
+
+2. **Automatic Loading**
+   - System checks for existing embeddings on startup
+   - If found, loads them instead of regenerating
+   - Falls back to generation if loading fails
+
+3. **Manual Regeneration**
+   - Endpoint: `POST /regenerate-embeddings`
+   - Forces complete regeneration of embeddings
+   - Useful after data updates or if embeddings become corrupted
+
+Example of forcing embedding regeneration:
+```bash
+curl -X POST http://localhost:5001/regenerate-embeddings
+```
 
 ## Implementation Details
 
@@ -200,7 +234,7 @@ Main class handling the RAG system functionality:
 
 3. **Data Storage**
    - Researcher expertise is stored in ChromaDB
-   - Embeddings are generated using sentence transformers
+   - Embeddings are persisted to disk for efficiency
    - Metadata maintains researcher-expertise relationships
 
 4. **Web Interface**

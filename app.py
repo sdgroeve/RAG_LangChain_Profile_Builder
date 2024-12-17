@@ -9,6 +9,7 @@ from sentence_transformers import SentenceTransformer
 import requests
 from collections import defaultdict
 from difflib import get_close_matches
+import pickle
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -18,13 +19,15 @@ class ResearcherExpertiseRAG:
     def __init__(self, 
                  expertise_data: dict,
                  embedding_model: str = 'all-MiniLM-L6-v2',
-                 response_model: str = 'llama3'):
+                 response_model: str = 'llama3',
+                 embeddings_dir: str = 'embeddings'):
         """
         Initialize the RAG system with researcher expertise data and Ollama integration.
         """
         self.expertise_data = expertise_data
         self.researcher_names = list(expertise_data.keys())
         self.model = SentenceTransformer(embedding_model)
+        self.embeddings_dir = embeddings_dir
         
         # Ollama configuration
         self.response_model = response_model
@@ -36,8 +39,9 @@ class ResearcherExpertiseRAG:
         # Test Ollama connection
         self._test_ollama_connection()
         
-        # Populate database once during initialization
-        self._populate_database()
+        # Try to load existing embeddings or populate database
+        if not self._load_embeddings():
+            self._populate_database(save_embeddings=True)
 
     def get_researcher_suggestions(self, query: str, max_suggestions: int = 5) -> list:
         """
@@ -89,8 +93,6 @@ class ResearcherExpertiseRAG:
         Includes fuzzy matching for researcher names.
         """
         # First try exact match
-        print(researcher_name)
-        print(self.expertise_data.keys())
         if researcher_name in self.expertise_data:
             return {
                 'researcher': researcher_name,
@@ -171,9 +173,55 @@ Respond with either:
             logger.error(f"Error evaluating query: {str(e)}")
             return False, f"Error evaluating query: {str(e)}"
 
-    def _populate_database(self):
+    def _get_embeddings_path(self):
+        """Get the path for storing embeddings."""
+        return os.path.join(self.embeddings_dir, 'embeddings.pkl')
+
+    def _save_embeddings(self, embeddings_data):
+        """Save embeddings to disk."""
+        os.makedirs(self.embeddings_dir, exist_ok=True)
+        with open(self._get_embeddings_path(), 'wb') as f:
+            pickle.dump(embeddings_data, f)
+        logger.info(f"Saved embeddings to {self._get_embeddings_path()}")
+
+    def _load_embeddings(self):
+        """Load embeddings from disk if they exist."""
+        try:
+            embeddings_path = self._get_embeddings_path()
+            if os.path.exists(embeddings_path):
+                with open(embeddings_path, 'rb') as f:
+                    embeddings_data = pickle.load(f)
+                
+                # Delete existing collection if it exists
+                try:
+                    self.chroma_client.delete_collection("researcher_papers")
+                except:
+                    pass
+
+                # Create new collection
+                self.collection = self.chroma_client.create_collection(
+                    name="researcher_papers",
+                    metadata={"hnsw:space": "cosine"}
+                )
+
+                # Add embeddings to collection
+                if embeddings_data['ids']:
+                    self.collection.add(
+                        ids=embeddings_data['ids'],
+                        embeddings=embeddings_data['embeddings'],
+                        documents=embeddings_data['documents'],
+                        metadatas=embeddings_data['metadatas']
+                    )
+                    logger.info(f"Successfully loaded {len(embeddings_data['ids'])} embeddings from disk")
+                    return True
+        except Exception as e:
+            logger.error(f"Error loading embeddings: {str(e)}")
+        return False
+
+    def _populate_database(self, save_embeddings: bool = True):
         """
         Embed paper summaries with researcher metadata in ChromaDB.
+        Optionally save embeddings to disk.
         """
         try:
             try:
@@ -224,6 +272,15 @@ Respond with either:
                     metadatas=metadatas
                 )
                 logger.info(f"Successfully populated database with {len(document_ids)} paper summaries")
+                
+                if save_embeddings:
+                    embeddings_data = {
+                        'ids': document_ids,
+                        'embeddings': embeddings,
+                        'documents': documents,
+                        'metadatas': metadatas
+                    }
+                    self._save_embeddings(embeddings_data)
             else:
                 logger.warning("No paper summaries found to populate the database")
         except Exception as e:
@@ -395,8 +452,8 @@ rag_system = None
 def initialize_rag_system():
     """Initialize or reinitialize the RAG system with fresh data."""
     global rag_system
-    expertise_file = os.path.join('output', 'publications_data_expertise.json')
-    researchers_file = os.path.join('researchers', 'hint.researchers.txt')
+    expertise_file = "T.expertise.json"
+    researchers_file = os.path.join('researchers', 'test.researchers.txt')  # Changed from test.researchers.txt to hint.researchers.txt
     
     try:
         # Read researchers list
@@ -441,6 +498,19 @@ def index():
     if rag_system is None:
         initialize_rag_system()
     return render_template('index.html')
+
+@app.route('/regenerate-embeddings', methods=['POST'])
+def regenerate_embeddings():
+    """Force regeneration of embeddings."""
+    global rag_system
+    try:
+        if rag_system is None:
+            initialize_rag_system()
+        rag_system._populate_database(save_embeddings=True)
+        return jsonify({'message': 'Embeddings regenerated successfully'})
+    except Exception as e:
+        logger.error(f"Error regenerating embeddings: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/chat', methods=['POST'])
 def chat():
