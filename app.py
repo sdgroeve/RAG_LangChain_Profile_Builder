@@ -387,6 +387,8 @@ Generate a response that:
 
 Important: Focus on the expertise demonstrated in the papers, not individual paper summaries."""
 
+        print(prompt)
+
         payload = {
             "model": self.response_model,
             "messages": [
@@ -452,8 +454,8 @@ rag_system = None
 def initialize_rag_system():
     """Initialize or reinitialize the RAG system with fresh data."""
     global rag_system
-    expertise_file = "T.expertise.json"
-    researchers_file = os.path.join('researchers', 'test.researchers.txt')  # Changed from test.researchers.txt to hint.researchers.txt
+    expertise_file = os.path.join('output', "hint.expertise.json")
+    researchers_file = os.path.join('researchers', 'hint.researchers.txt')  # Changed from test.researchers.txt to hint.researchers.txt
     
     try:
         # Read researchers list
@@ -595,7 +597,7 @@ if __name__ == '__main__':
     parser.add_argument('--cli', action='store_true', help='Run in CLI mode')
     parser.add_argument('--data', type=str, help='Path to expertise data JSON file')
     parser.add_argument('--query', type=str, help='Query string for CLI mode')
-    parser.add_argument('--port', type=int, default=5001, help='Port for web server (default: 5001)')
+    parser.add_argument('--port', type=int, default=5000, help='Port for web server (default: 5000)')
     
     args = parser.parse_args()
     
