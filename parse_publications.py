@@ -175,7 +175,7 @@ def main():
 
     # Initialize Ollama LLM
     try:
-        llm = OllamaLLM(model="llama3", temperature=0)
+        llm = OllamaLLM(model="gemma", temperature=0)
         logging.info("Successfully initialized LLM model")
     except Exception as e:
         logging.error(f"Failed to initialize LLM model: {str(e)}")
