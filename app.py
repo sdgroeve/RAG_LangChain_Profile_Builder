@@ -5,7 +5,6 @@ import logging
 from flask import Flask, render_template, request, jsonify
 from flask_cors import CORS
 import chromadb
-from sentence_transformers import SentenceTransformer
 import requests
 from collections import defaultdict
 from difflib import get_close_matches
@@ -18,16 +17,19 @@ logger = logging.getLogger(__name__)
 class ResearcherExpertiseRAG:
     def __init__(self, 
                  expertise_data: dict,
-                 embedding_model: str = 'all-MiniLM-L6-v2',
                  response_model: str = 'llama3',
-                 embeddings_dir: str = 'embeddings'):
+                 embeddings_path: str = 'embeddings/embeddings.pkl'):
         """
         Initialize the RAG system with researcher expertise data and Ollama integration.
+        
+        Args:
+            expertise_data: Dictionary containing researcher expertise data
+            response_model: Model to use for Ollama responses
+            embeddings_path: Path to the embeddings pickle file
         """
         self.expertise_data = expertise_data
         self.researcher_names = list(expertise_data.keys())
-        self.model = SentenceTransformer(embedding_model)
-        self.embeddings_dir = embeddings_dir
+        self.embeddings_path = embeddings_path
         
         # Ollama configuration
         self.response_model = response_model
@@ -39,9 +41,8 @@ class ResearcherExpertiseRAG:
         # Test Ollama connection
         self._test_ollama_connection()
         
-        # Try to load existing embeddings or populate database
-        if not self._load_embeddings():
-            self._populate_database(save_embeddings=True)
+        # Load embeddings
+        self._load_embeddings()
 
     def get_researcher_suggestions(self, query: str, max_suggestions: int = 5) -> list:
         """
@@ -173,120 +174,63 @@ Respond with either:
             logger.error(f"Error evaluating query: {str(e)}")
             return False, f"Error evaluating query: {str(e)}"
 
-    def _get_embeddings_path(self):
-        """Get the path for storing embeddings."""
-        return os.path.join(self.embeddings_dir, 'embeddings.pkl')
-
-    def _save_embeddings(self, embeddings_data):
-        """Save embeddings to disk."""
-        os.makedirs(self.embeddings_dir, exist_ok=True)
-        with open(self._get_embeddings_path(), 'wb') as f:
-            pickle.dump(embeddings_data, f)
-        logger.info(f"Saved embeddings to {self._get_embeddings_path()}")
-
     def _load_embeddings(self):
-        """Load embeddings from disk if they exist."""
-        try:
-            embeddings_path = self._get_embeddings_path()
-            if os.path.exists(embeddings_path):
-                with open(embeddings_path, 'rb') as f:
-                    embeddings_data = pickle.load(f)
-                
-                # Delete existing collection if it exists
-                try:
-                    self.chroma_client.delete_collection("researcher_papers")
-                except:
-                    pass
-
-                # Create new collection
-                self.collection = self.chroma_client.create_collection(
-                    name="researcher_papers",
-                    metadata={"hnsw:space": "cosine"}
-                )
-
-                # Add embeddings to collection
-                if embeddings_data['ids']:
-                    self.collection.add(
-                        ids=embeddings_data['ids'],
-                        embeddings=embeddings_data['embeddings'],
-                        documents=embeddings_data['documents'],
-                        metadatas=embeddings_data['metadatas']
-                    )
-                    logger.info(f"Successfully loaded {len(embeddings_data['ids'])} embeddings from disk")
-                    return True
-        except Exception as e:
-            logger.error(f"Error loading embeddings: {str(e)}")
-        return False
-
-    def _populate_database(self, save_embeddings: bool = True):
         """
-        Embed paper summaries with researcher metadata in ChromaDB.
-        Optionally save embeddings to disk.
+        Load embeddings from disk and initialize ChromaDB collection,
+        handling embeddings of potentially different lengths.
         """
         try:
+            if not os.path.exists(self.embeddings_path):
+                raise FileNotFoundError(f"Embeddings file not found at {self.embeddings_path}. Please run generate_embeddings.py first.")
+
+            with open(self.embeddings_path, 'rb') as f:
+                embeddings_data = pickle.load(f)
+
+            # Ensure embeddings data contains embeddings and metadata
+            if not embeddings_data.get('embeddings') or not embeddings_data.get('ids'):
+                raise ValueError("Embeddings file does not contain required data.")
+
+            # Determine the embedding dimensions
+            embedding_lengths = set(len(emb) for emb in embeddings_data['embeddings'])
+            logger.info(f"Detected unique embedding lengths: {embedding_lengths}")
+
+            if len(embedding_lengths) > 1:
+                raise ValueError("Embeddings contain multiple dimensions. Ensure all embeddings have the same dimensionality.")
+
+            # Get the consistent embedding dimension
+            embedding_dim = next(iter(embedding_lengths))
+
+            # Delete existing collection if it exists
             try:
                 self.chroma_client.delete_collection("researcher_papers")
-            except:
+                logger.info("Successfully deleted existing collection")
+            except ValueError as e:
+                # Collection doesn't exist, which is fine
+                logger.info("No existing collection to delete")
                 pass
+            except Exception as e:
+                logger.warning(f"Unexpected error deleting collection: {e}")
 
+            # Create a new collection with the detected embedding dimension
             self.collection = self.chroma_client.create_collection(
-                name="researcher_papers", 
+                name="researcher_papers",
                 metadata={"hnsw:space": "cosine"}
             )
+            logger.info(f"Created new collection with dimension {embedding_dim}")
 
-            document_ids = []
-            embeddings = []
-            metadatas = []
-            documents = []
-            
-            for researcher, publications in self.expertise_data.items():
-                for i, pub in enumerate(publications):
-                    if "summary" in pub:
-                        # Create unique ID
-                        doc_id = f"{researcher}_{i}"
-                        document_ids.append(doc_id)
-                        
-                        # Get the summary
-                        summary = pub["summary"]
-                        documents.append(summary)
-                        
-                        # Embed summary
-                        embedding = self.model.encode(summary).tolist()
-                        embeddings.append(embedding)
-                        
-                        # Store metadata
-                        metadatas.append({
-                            "researcher": researcher,
-                            "year": pub.get("year", "Unknown"),
-                            "url": pub.get("url", ""),
-                            "doi": pub.get("doi", ""),
-                            "keywords": ", ".join(pub.get("keywords", [])),
-                            "abstract": pub.get("abstract", "")
-                        })
+            # Add embeddings to the collection
+            self.collection.add(
+                ids=embeddings_data['ids'],
+                embeddings=embeddings_data['embeddings'],
+                documents=embeddings_data['documents'],
+                metadatas=embeddings_data['metadatas']
+            )
+            logger.info(f"Successfully loaded {len(embeddings_data['embeddings'])} embeddings into collection")
 
-            if document_ids:
-                self.collection.add(
-                    ids=document_ids,
-                    embeddings=embeddings,
-                    documents=documents,
-                    metadatas=metadatas
-                )
-                logger.info(f"Successfully populated database with {len(document_ids)} paper summaries")
-                
-                if save_embeddings:
-                    embeddings_data = {
-                        'ids': document_ids,
-                        'embeddings': embeddings,
-                        'documents': documents,
-                        'metadatas': metadatas
-                    }
-                    self._save_embeddings(embeddings_data)
-            else:
-                logger.warning("No paper summaries found to populate the database")
         except Exception as e:
-            logger.error(f"Error populating database: {str(e)}")
+            logger.error(f"Error loading embeddings: {str(e)}")
             raise
-
+    
     def search_expertise(self, query: str, top_k: int = 5) -> dict:
         """
         Search for similar paper summaries and generate expertise summary.
@@ -302,10 +246,9 @@ Respond with either:
             }
 
         try:
-            query_embedding = self.model.encode(query).tolist()
-            
+            # Use ChromaDB's query method which handles the embedding internally
             results = self.collection.query(
-                query_embeddings=[query_embedding],
+                query_texts=[query],
                 n_results=top_k,
                 include=["documents", "metadatas", "distances"]
             )
@@ -372,7 +315,8 @@ Paper Summaries:
         for result in search_results:
             prompt += f"\nResearcher: {result['researcher']}\n"
             for paper in result['papers']:
-                prompt += f"- {paper['summary']}\n"
+                model_type = paper['metadata'].get('model', 'base')
+                prompt += f"- [{model_type}] {paper['summary']}\n"
                 if paper['metadata']['keywords']:
                     prompt += f"  Keywords: {paper['metadata']['keywords']}\n"
         
@@ -385,9 +329,7 @@ Generate a response that:
 5. Ensures each researcher is mentioned exactly once
 6. Maintains a clear and professional tone
 
-Important: Focus on the expertise demonstrated in the papers, not individual paper summaries."""
-
-        print(prompt)
+Important: Focus on the expertise demonstrated in the papers, not individual paper summaries. Consider both base and llama_70b summaries equally."""
 
         payload = {
             "model": self.response_model,
@@ -451,11 +393,11 @@ CORS(app)
 # Global variable for RAG system
 rag_system = None
 
-def initialize_rag_system():
+def initialize_rag_system(embeddings_path: str = None):
     """Initialize or reinitialize the RAG system with fresh data."""
     global rag_system
-    expertise_file = os.path.join('output', "hint.expertise.json")
-    researchers_file = os.path.join('researchers', 'hint.researchers.txt')  # Changed from test.researchers.txt to hint.researchers.txt
+    expertise_file = os.path.join('output', "test.gemma.expertise.json")
+    researchers_file = os.path.join('researchers', 'test.researchers.txt')
     
     try:
         # Read researchers list
@@ -484,7 +426,10 @@ def initialize_rag_system():
                     for researcher in sorted(researchers_without_data):
                         logger.info(f"  - {researcher}")
                 
-                rag_system = ResearcherExpertiseRAG(expertise_data=json_data)
+                rag_system = ResearcherExpertiseRAG(
+                    expertise_data=json_data,
+                    embeddings_path=embeddings_path
+                )
                 logger.info("Successfully initialized RAG system")
         else:
             logger.error(f"Expertise data file not found at {expertise_file}")
@@ -500,19 +445,6 @@ def index():
     if rag_system is None:
         initialize_rag_system()
     return render_template('index.html')
-
-@app.route('/regenerate-embeddings', methods=['POST'])
-def regenerate_embeddings():
-    """Force regeneration of embeddings."""
-    global rag_system
-    try:
-        if rag_system is None:
-            initialize_rag_system()
-        rag_system._populate_database(save_embeddings=True)
-        return jsonify({'message': 'Embeddings regenerated successfully'})
-    except Exception as e:
-        logger.error(f"Error regenerating embeddings: {str(e)}")
-        return jsonify({'error': str(e)}), 500
 
 @app.route('/chat', methods=['POST'])
 def chat():
@@ -598,6 +530,8 @@ if __name__ == '__main__':
     parser.add_argument('--data', type=str, help='Path to expertise data JSON file')
     parser.add_argument('--query', type=str, help='Query string for CLI mode')
     parser.add_argument('--port', type=int, default=5000, help='Port for web server (default: 5000)')
+    parser.add_argument('--embeddings', type=str, default='embeddings/embeddings.pkl',
+                       help='Path to embeddings pickle file (default: embeddings/embeddings.pkl)')
     
     args = parser.parse_args()
     
@@ -609,5 +543,5 @@ if __name__ == '__main__':
         run_cli_mode(args.data, args.query)
     else:
         # Initialize RAG system before starting the server
-        initialize_rag_system()
+        initialize_rag_system(embeddings_path=args.embeddings)
         app.run(debug=True, port=args.port)
